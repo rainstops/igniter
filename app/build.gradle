@@ -44,7 +44,8 @@ android {
         }
         externalNativeBuild {
             cmake {
-                arguments "-DANDROID_CPP_FEATURES=rtti exceptions"
+                arguments "-DANDROID_CPP_FEATURES=rtti exceptions",
+                        "-DCMAKE_CXX_STANDARD=14"
             }
         }
         archivesBaseName = "$applicationId-v$versionName-$versionCode"
