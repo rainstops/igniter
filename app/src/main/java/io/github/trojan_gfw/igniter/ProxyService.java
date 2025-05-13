@@ -80,6 +80,8 @@ public class ProxyService extends VpnService implements TestConnection.OnResultL
     public long tun2socksPort = INVALID_PORT;
     public boolean enable_clash = false;
     public boolean allowLan = false;
+    private long lastTrojanPort = -1;
+    private long lastClashPort = -1;
 
     @IntDef({STATE_NONE, STARTING, STARTED, STOPPING, STOPPED})
     public @interface ProxyState {
@@ -431,75 +433,7 @@ public class ProxyService extends VpnService implements TestConnection.OnResultL
 
         startNetworkConnectivityMonitor();
         final int fixedPort = settingsDataManager.loadFixedPort();
-        long trojanPort, clashSocksPort = 1080; // default value in case fail to get free port
-        // Determine trojanPort and clashSocksPort according to the user configurations (Clash, fixed port).
-        // If allowLan is false, both trojanPort and clashSocksPort will be assigned by Freeport.
-        // If allowLan is true, user-specified port will be assigned to clashSocksPort if clash is enable,
-        // otherwise, user-specified port will be assigned to trojanPort. Eventually, the user-specified
-        // port will be assigned to tun2socksPort, which is visible to user over the notification.
-        if (enable_clash) {
-            try {
-                do {
-                    trojanPort = Freeport.getFreePort();
-                } while (trojanPort == fixedPort);
-            } catch (Exception e) {
-                e.printStackTrace();
-                trojanPort = 1081;
-            }
-            if (!allowLan || -1 == fixedPort) {
-                try {
-                    do { // clash and trojan should NOT listen on the same port
-                        clashSocksPort = Freeport.getFreePort();
-                    }
-                    while (clashSocksPort == trojanPort);
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-            } else {
-                clashSocksPort = fixedPort;
-            }
-        } else {
-            if (!allowLan || -1 == fixedPort) {
-                try {
-                    trojanPort = Freeport.getFreePort();
-                } catch (Exception e) {
-                    e.printStackTrace();
-                    trojanPort = 1081;
-                }
-            } else {
-                trojanPort = fixedPort;
-            }
-        }
-
-        LogHelper.i("Igniter", "trojan port is " + trojanPort);
-        TrojanHelper.ChangeListenPort(Globals.getTrojanConfigPath(), trojanPort);
-        TrojanHelper.ShowConfig(Globals.getTrojanConfigPath());
-
-        JNIHelper.trojan(Globals.getTrojanConfigPath());
-
-        if (enable_clash) {
-            try {
-                LogHelper.i("igniter", "clash port is " + clashSocksPort);
-                ClashHelper.ShowConfig(Globals.getClashConfigPath());
-                ClashStartOptions clashStartOptions = new ClashStartOptions();
-                clashStartOptions.setHomeDir(getFilesDir().toString());
-                clashStartOptions.setTrojanProxyServer("127.0.0.1:" + trojanPort);
-                if (allowLan) {
-                    // Clash specific syntax for any address
-                    clashStartOptions.setSocksListener("*:" + clashSocksPort);
-                } else {
-                    clashStartOptions.setSocksListener("127.0.0.1:" + clashSocksPort);
-                }
-                clashStartOptions.setTrojanProxyServerUdpEnabled(true);
-                Clash.start(clashStartOptions);
-                LogHelper.i("Clash", "clash started");
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-            tun2socksPort = clashSocksPort;
-        } else {
-            tun2socksPort = trojanPort;
-        }
+        generatePort(fixedPort);
         LogHelper.i("igniter", "tun2socks port is " + tun2socksPort);
 
         String socks5ServerAddrPort;
@@ -554,6 +488,86 @@ public class ProxyService extends VpnService implements TestConnection.OnResultL
         return START_STICKY;
     }
 
+    private void generatePort(int fixedPort) {
+        long trojanPort, clashSocksPort = 1080; // default value in case fail to get free port
+        // Determine trojanPort and clashSocksPort according to the user configurations (Clash, fixed port).
+        // If allowLan is false, both trojanPort and clashSocksPort will be assigned by Freeport.
+        // If allowLan is true, user-specified port will be assigned to clashSocksPort if clash is enable,
+        // otherwise, user-specified port will be assigned to trojanPort. Eventually, the user-specified
+        // port will be assigned to tun2socksPort, which is visible to user over the notification.
+        if (lastTrojanPort > 0 && lastClashPort > 0) {
+            trojanPort = lastTrojanPort;
+            clashSocksPort = lastClashPort;
+            LogHelper.i("Igniter", "use last port");
+        } else {
+            if (enable_clash) {
+                try {
+                    do {
+                        trojanPort = Freeport.getFreePort();
+                    } while (trojanPort == fixedPort);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    trojanPort = 1081;
+                }
+                if (!allowLan || -1 == fixedPort) {
+                    try {
+                        do { // clash and trojan should NOT listen on the same port
+                            clashSocksPort = Freeport.getFreePort();
+                        }
+                        while (clashSocksPort == trojanPort);
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                } else {
+                    clashSocksPort = fixedPort;
+                }
+            } else {
+                if (!allowLan || -1 == fixedPort) {
+                    try {
+                        trojanPort = Freeport.getFreePort();
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        trojanPort = 1081;
+                    }
+                } else {
+                    trojanPort = fixedPort;
+                }
+            }
+            lastTrojanPort = trojanPort;
+            lastClashPort = clashSocksPort;
+        }
+
+        LogHelper.i("Igniter", "trojan port is " + trojanPort);
+        TrojanHelper.ChangeListenPort(Globals.getTrojanConfigPath(), trojanPort);
+        TrojanHelper.ShowConfig(Globals.getTrojanConfigPath());
+
+        JNIHelper.trojan(Globals.getTrojanConfigPath());
+
+        if (enable_clash) {
+            try {
+                LogHelper.i("igniter", "clash port is " + clashSocksPort);
+                ClashHelper.ShowConfig(Globals.getClashConfigPath());
+                ClashStartOptions clashStartOptions = new ClashStartOptions();
+                clashStartOptions.setHomeDir(getFilesDir().toString());
+                clashStartOptions.setTrojanProxyServer("127.0.0.1:" + trojanPort);
+                if (allowLan) {
+                    // Clash specific syntax for any address
+                    clashStartOptions.setSocksListener("*:" + clashSocksPort);
+                } else {
+                    clashStartOptions.setSocksListener("127.0.0.1:" + clashSocksPort);
+                }
+                clashStartOptions.setTrojanProxyServerUdpEnabled(true);
+                Clash.start(clashStartOptions);
+                LogHelper.i("Clash", "clash started");
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            tun2socksPort = clashSocksPort;
+        } else {
+            tun2socksPort = trojanPort;
+        }
+    }
+
     private void shutdown() {
         LogHelper.i(TAG, "shutdown");
         setState(STOPPING);
@@ -599,7 +613,7 @@ public class ProxyService extends VpnService implements TestConnection.OnResultL
     public void stop() {
         shutdown();
         // this is essential for gomobile aar
-        android.os.Process.killProcess(android.os.Process.myPid());
+        // android.os.Process.killProcess(android.os.Process.myPid());
     }
 
     private void startNetworkConnectivityMonitor() {
