@@ -46,6 +46,7 @@ android {
             cmake {
                 arguments "-DANDROID_CPP_FEATURES=rtti exceptions",
                         "-DCMAKE_CXX_STANDARD=14"
+                cppFlags "-Wno-enum-constexpr-conversion"  // 禁用特定警告
             }
         }
         archivesBaseName = "$applicationId-v$versionName-$versionCode"
